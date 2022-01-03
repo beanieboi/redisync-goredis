@@ -1,31 +1,34 @@
 package redisync
 
 import (
-	"net/url"
-	"os"
-	"github.com/garyburd/redigo/redis"
+	"context"
 	"fmt"
+	"os"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
-var rc redis.Conn
+var rc *redis.Client
 
 func init() {
-	redisUrl, err := url.Parse(os.Getenv("REDIS_URL"))
-	if err != nil {
+	_, exists := os.LookupEnv("REDIS_URL")
+	if !exists {
 		panic("Must set: $REDIS_URL")
 	}
-	rc, err = redis.Dial("tcp", redisUrl.Host)
+	options, err := redis.ParseURL(os.Getenv("REDIS_URL"))
+	rc = redis.NewClient(options)
 	if err != nil {
 		panic("Unable to connect to: $REDIS_URL")
 	}
 }
 
 func ExampleLock() {
+	ctx := context.Background()
 	ttl := time.Second
 	m := NewMutex("my-lock", ttl)
-	m.Lock(rc)
-	defer m.Unlock(rc)
+	m.Lock(ctx, rc)
+	defer m.Unlock(ctx, rc)
 
 	done := make(chan bool)
 	expired := make(chan bool)

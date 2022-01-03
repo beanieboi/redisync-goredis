@@ -1,13 +1,15 @@
 // Synchronization built on top of Redis.
-// Depends on github.com/garyburd/redigo/redis
+// Depends on github.com/go-redis/redis/
 package redisync
 
 import (
+	"context"
 	"fmt"
-	"github.com/garyburd/redigo/redis"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 /*
@@ -38,6 +40,7 @@ else
 	return 1
 end
 `
+
 /*
 Unlocking algorithm:
 	if the key exists
@@ -87,17 +90,17 @@ func NewMutex(name string, ttl time.Duration) *Mutex {
 	m.Ttl = ttl
 	m.Backoff = time.Second
 	m.id = uuid()
-	m.lock = redis.NewScript(1, luaLock)
-	m.unlock = redis.NewScript(1, luaUnlock)
+	m.lock = redis.NewScript(luaLock)
+	m.unlock = redis.NewScript(luaUnlock)
 	return m
 }
 
 // With similar behaviour to Go's sync pkg,
 // this function will sleep until TryLock() returns true.
 // The connection will be used once to execute the lock script.
-func (m *Mutex) Lock(c redis.Conn) {
+func (m *Mutex) Lock(ctx context.Context, c *redis.Client) {
 	for {
-		if m.TryLock(c) {
+		if m.TryLock(ctx, c) {
 			return
 		}
 		time.Sleep(m.Backoff)
@@ -108,28 +111,29 @@ func (m *Mutex) Lock(c redis.Conn) {
 // Locking a mutex which has already been locked
 // using the mutex uuid will result in the TTL of the mutex being extended.
 // The connection will be used once to execute the lock script.
-func (m *Mutex) TryLock(c redis.Conn) bool {
+func (m *Mutex) TryLock(ctx context.Context, c *redis.Client) bool {
 	m.l.Lock()
 	defer m.l.Unlock()
 
-	reply, err := m.lock.Do(c, m.Name, m.id, m.Ttl.Seconds())
-	if err != nil {
+	cmd := m.lock.Eval(ctx, c, []string{m.Name}, m.id, m.Ttl.Seconds())
+
+	if cmd.Err() != nil {
 		return false
 	}
-	return reply.(int64) == 1
+	return cmd.Val().(int64) == 1
 }
 
 // If the local mutex uuid matches the uuid in Redis,
 // the lock will be deleted.
 // The connection will be used once to execute the unlock script.
-func (m *Mutex) Unlock(c redis.Conn) (bool, error) {
+func (m *Mutex) Unlock(ctx context.Context, c *redis.Client) (bool, error) {
 	m.l.Lock()
 	defer m.l.Unlock()
-	reply, err := m.unlock.Do(c, m.Name, m.id)
-	if err != nil {
-		return false, err
+	cmd := m.unlock.Eval(ctx, c, []string{m.Name}, m.id)
+	if cmd.Err() != nil {
+		return false, cmd.Err()
 	}
-	return reply.(int64) == 1, nil
+	return cmd.Val().(int64) == 1, nil
 }
 
 func uuid() string {
