@@ -128,7 +128,6 @@ func (m *Mutex) TryLock(ctx context.Context, c *redis.Client) bool {
 // The connection will be used once to execute the unlock script.
 func (m *Mutex) Unlock(ctx context.Context, c *redis.Client) (bool, error) {
 	m.l.Lock()
-
 	defer m.l.Unlock()
 	cmd := m.unlock.EvalSha(ctx, c, []string{m.Name}, m.id)
 	if cmd.Err() != nil {
