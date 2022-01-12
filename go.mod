@@ -1,4 +1,4 @@
-module github.com/beanieboi/redisync
+module github.com/beanieboi/redisync-goredis
 
 go 1.17
 
